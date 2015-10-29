@@ -5,6 +5,16 @@ import datetime
 from collections import OrderedDict
 import getopt
 
+class NominaItem:
+    def __init__(self,concepto,importeExento,importeGravado):
+        self.concepto = concepto
+        self.importeExcento = importeExento
+        self.importeGravado = importeGravado
+        
+    def __str__(self):
+        total = float(self.importeExcento+self.importeGravado)
+        return "%-40s $%s"%(self.concepto,'{:10,.2f}'.format(total))
+
 class Factura:
     def __init__(self, dirname, filename, isNomina):
         self.total = 0
@@ -17,19 +27,36 @@ class Factura:
         self.emisor = ''
         self.buzon = False
         self.nomina = isNomina
+        self.percepciones = []
+        self.deducciones = []
         self.fecha_inicial = None
         self.fecha_final = None
                 
     def __str__(self):
         header = "%s - %s - %s "%(os.path.basename(os.path.abspath(os.path.join(self.dirname,os.path.pardir))), os.path.basename(self.dirname), self.filename)
         header = "=== %-46s | %38s ==="%(header, self.uuid) 
-        text =  "%i days: %7.2f - [%s] --- %-25s"%(self.delta.days, self.total, self.fecha.date(), self.fecha.date().strftime("%m/%d/%Y") )
+        text =  "%i days: $%s (%7.2f)  %-25s"%(self.delta.days, '{:0,.2f}'.format(self.total), self.total,  self.fecha.date().strftime("%m/%d/%Y") )
+        
         #text = "%s     %s"%(text,self.uuid)
         sep = '='*(len(header))
 
         text = "%s\n%s"%(self.emisor,text)
         for concepto in self.conceptos:
             text = "%s\n    * %s"%(text,concepto)
+        
+        total_p = 0
+        for percepcion in self.percepciones:
+            text = "%s\n       + %s"%(text,percepcion)
+            total_p = total_p + percepcion.importeExcento + percepcion.importeGravado
+        if total_p > 0:
+            text = "%s\n       %s $%s"%(text,"-"*50,'{:0,.2f}'.format(total_p))
+        
+        total_d = 0
+        for deduccion in self.deducciones:
+            text = "%s\n       - %s"%(text,deduccion)
+            total_d = total_d +  deduccion.importeExcento + deduccion.importeGravado
+        if total_d > 0:
+            text = "%s\n       %s $%s"%(text,"-"*50,'{:0,.2f}'.format(total_d))
         all = "\n%s\n%s\n%s\n%s"%(sep,header,sep,text)
         return all #.encode('utf8')
         
@@ -76,8 +103,17 @@ class Factura:
             #print _nomina.get("FechaPago"), _nomina.get("FechaInicialPago"), _nomina.get("FechaFinalPago")
             self.fecha_inicial = datetime.datetime.strptime(_nomina.get("FechaInicialPago") , "%Y-%m-%d" )
             self.fecha_final   =   datetime.datetime.strptime(_nomina.get("FechaFinalPago") , "%Y-%m-%d" )
+            for p in _nomina.iter("{http://www.sat.gob.mx/nomina}Percepcion"):
+                x = NominaItem(p.get("Concepto"),float(p.get("ImporteExento")),float(p.get("ImporteGravado")))
+                self.percepciones.append(x) 
+
+            for d in _nomina.iter("{http://www.sat.gob.mx/nomina}Deduccion"):
+                x = NominaItem(d.get("Concepto"),float(d.get("ImporteExento")),float(d.get("ImporteGravado")))
+                self.deducciones.append(x) 
 
                 
+
+
 
 class Facturas:
     def __init__(self):
@@ -156,7 +192,7 @@ class Facturas:
             total += f.total
             dir_text = "%s\n%s"%(dir_text,f)
         #dir_text = "%s%s\n%s"%('#'*len(dir_head),dir_head,'#'*len(dir_head)) + dir_text 
-        print "%s\n\n--  TOTAL: $ %0.2f --\n--  Delta: %i days --\n--  %i Facturas --\n"%(dir_text,total,max_delta,len(data))
+        print "%s\n\n--  TOTAL: $ %s --\n--  Delta: %i days --\n--  %i Facturas --\n"%(dir_text.encode('utf-8'),'{:0,.2f}'.format(total),max_delta,len(data))
     
     def sort_dict_data(self):
         self.facturas
@@ -170,6 +206,7 @@ class Facturas:
         print "        -h, --help                    display this help and exit"
         print "        -r, --rename  <base>          Rename the files unsing <base>_date"
         print "        -n, --nomina                  Parse XMLs as nomina"
+
     
     def parse_args(self,argv):
         try:
