@@ -6,7 +6,7 @@ from collections import OrderedDict
 import getopt
 
 class Factura:
-    def __init__(self, dirname, filename):
+    def __init__(self, dirname, filename, isNomina):
         self.total = 0
         self.fecha = None
         self.conceptos = []
@@ -16,6 +16,9 @@ class Factura:
         self.delta = None
         self.emisor = ''
         self.buzon = False
+        self.nomina = isNomina
+        self.fecha_inicial = None
+        self.fecha_final = None
                 
     def __str__(self):
         header = "%s - %s - %s "%(os.path.basename(os.path.abspath(os.path.join(self.dirname,os.path.pardir))), os.path.basename(self.dirname), self.filename)
@@ -68,7 +71,12 @@ class Factura:
             for x in _concepto.iter("{http://www.sat.gob.mx/cfd/3}Concepto"):
                 descripcion = x.get('descripcion')
                 self.conceptos.append(descripcion)
-        
+
+        for _nomina in root.iter("{http://www.sat.gob.mx/nomina}Nomina"):
+            #print _nomina.get("FechaPago"), _nomina.get("FechaInicialPago"), _nomina.get("FechaFinalPago")
+            self.fecha_inicial = datetime.datetime.strptime(_nomina.get("FechaInicialPago") , "%Y-%m-%d" )
+            self.fecha_final   =   datetime.datetime.strptime(_nomina.get("FechaFinalPago") , "%Y-%m-%d" )
+
                 
 
 class Facturas:
@@ -78,6 +86,8 @@ class Facturas:
         self.buzon    = []
         self.uuids=[]
         self.print_buzon=False
+        self.rename=None
+        self.nomina = False
 
     def load_xmls(self, from_path, recursive):
         for dirname, subdirs, fnames in os.walk( os.path.abspath( from_path ) ) :
@@ -91,7 +101,7 @@ class Facturas:
             for fnamex in fnames:
                 if fnmatch.fnmatch( fnamex, '*.xml' ):
                     #print dirname,fnamex
-                    f = Factura( dirname, fnamex  )
+                    f = Factura( dirname, fnamex, self.nomina  )
                     f.load_xml()
                     f.buzon = buzon
                     if f.uuid in self.uuids:
@@ -101,22 +111,41 @@ class Facturas:
                     else:
                         self.facturas.append(f)
                     self.uuids.append(f.uuid)
-                    
-    def print_facturas(self):
-        self.print_data(sorted(self.facturas, key=lambda x: x.fecha, reverse=False))
-        print "-- loaded %i files --"%len(self.uuids)
-        print "-- %i Pendings --"%len(self.facturas)
-        print "-- %i Buzon    --"%len(self.buzon)
-        print "-- %i Repeated --"%len(self.repeated)
-        
-        #for x in sorted(self.uuids): print x
-        if len(self.repeated) >0:
-            print "\nRepeated: %i"%len(self.repeated)
-            self.print_data(sorted(self.repeated, key=lambda x: x.fecha, reverse=False))
+
+    def process_facturas(self):
+        if self.rename != None and self.nomina:
+            for f in self.facturas:
+                file,ext = os.path.splitext(f.filename)
+                #print f.dirname, f.filename, "-->",os.path.join(f.dirname,"%s_%s_%s%s"%(self.rename, f.fecha_inicial.date().strftime("%Y-%m-%d"), f.fecha_final.date().strftime("%Y-%m-%d"),ext))
+                old = os.path.join(f.dirname,f.filename)
+                new = os.path.join(f.dirname,"%s_%s_%s%s"%(self.rename, f.fecha_inicial.date().strftime("%Y-%m-%d"), f.fecha_final.date().strftime("%Y-%m-%d"),ext))
+                if old != new:
+                    print old, "===>", new
+                    os.rename(old,new)
+                
+                old_pdf = os.path.join(f.dirname,"%s%s"%(file,".pdf"))
+                if os.path.exists(old_pdf):
+                    new_pdf = os.path.join(f.dirname, "%s_%s_%s%s"%(self.rename, f.fecha_inicial.date().strftime("%Y-%m-%d"), f.fecha_final.date().strftime("%Y-%m-%d"),".pdf"))
+                    if old_pdf != new_pdf:
+                        print old_pdf,"===>",new_pdf
+                        os.rename(old_pdf, new_pdf)
             
-        if self.print_buzon and len(self.buzon) > 0:
-            print "\n Buzon: %i"%len(self.buzon)
-            self.print_data(sorted(self.buzon, key=lambda x: x.fecha, reverse=False))
+    def print_facturas(self):
+        if self.rename == None:
+            self.print_data(sorted(self.facturas, key=lambda x: x.fecha, reverse=False))
+            print "-- loaded %i files --"%len(self.uuids)
+            print "-- %i Pendings --"%len(self.facturas)
+            print "-- %i Buzon    --"%len(self.buzon)
+            print "-- %i Repeated --"%len(self.repeated)
+            
+            #for x in sorted(self.uuids): print x
+            if len(self.repeated) >0:
+                print "\nRepeated: %i"%len(self.repeated)
+                self.print_data(sorted(self.repeated, key=lambda x: x.fecha, reverse=False))
+                
+            if self.print_buzon and len(self.buzon) > 0:
+                print "\n Buzon: %i"%len(self.buzon)
+                self.print_data(sorted(self.buzon, key=lambda x: x.fecha, reverse=False))
 
     def print_data(self, data):
         total =0
@@ -139,10 +168,12 @@ class Facturas:
         print "options:"
         print "        -b, --buzon                   display files already sent"
         print "        -h, --help                    display this help and exit"
+        print "        -r, --rename  <base>          Rename the files unsing <base>_date"
+        print "        -n, --nomina                  Parse XMLs as nomina"
     
     def parse_args(self,argv):
         try:
-            opts, args = getopt.getopt(argv, "b", ["buzon"])
+            opts, args = getopt.getopt(argv, "bhr:n", ["buzon","help","rename=", "nomina"])
         except getopt.GetoptError, err:
             print str(err)
             self.usage()
@@ -152,7 +183,11 @@ class Facturas:
             #print "a: ", a
             if o in ("-b", "--buzon"):
                 self.print_buzon=True
-            if o in ("-h","--help"):
+            elif o in ("-r", "--rename"):
+                self.rename = a
+            elif o in ("-n","--nomina"):
+                self.nomina = True
+            elif o in ("-h","--help"):
                 self.usage()
                 sys.exit(0)
 
@@ -161,6 +196,7 @@ if __name__ == "__main__":
     f = Facturas()
     f.parse_args(sys.argv[1:])
     f.load_xmls(os.getcwd(),True)
+    f.process_facturas()
     f.print_facturas()
    
     sys.exit(0)
