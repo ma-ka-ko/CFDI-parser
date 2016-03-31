@@ -109,13 +109,11 @@ class Factura:
         for _persona in root_persona:
             persona = Persona(_persona.get('rfc'), _persona.get('nombre'))
             _domicilio = _persona.find("{http://www.sat.gob.mx/cfd/3}Domicilio")
-            print _domicilio
             if _domicilio == None:
                 _domicilio = _persona.find("{http://www.sat.gob.mx/cfd/3}DomicilioFiscal")
             if _domicilio != None:
                 persona.domicilio = Domicilio()
                 persona.domicilio.calle = _domicilio.get("calle");
-                print persona.domicilio.calle
                 persona.domicilio.noExterior = _domicilio.get("noExterior");
                 persona.domicilio.colonia = _domicilio.get("colonia");
                 persona.domicilio.localidad = _domicilio.get("localidad");
