@@ -66,11 +66,12 @@ class Factura:
         self.deducciones = []
         self.fecha_inicial = None
         self.fecha_final = None
+        self.metodoDePago = ''
                 
     def __str__(self):
         header = "%s - %s - %s "%(os.path.basename(os.path.abspath(os.path.join(self.dirname,os.path.pardir))), os.path.basename(self.dirname), self.filename)
         header = "=== %-46s | %38s ==="%(header, self.uuid) 
-        text =  "%i days: $%s (%7.2f)  %-25s"%(self.delta.days, '{:0,.2f}'.format(self.total), self.total,  self.fecha.date().strftime("%m/%d/%Y") )
+        text =  "%i days: $%s (%7.2f) %s  %-25s"%(self.delta.days, '{:0,.2f}'.format(self.total), self.total, self.metodoDePago , self.fecha.date().strftime("%m/%d/%Y") )
         
         #text = "%s     %s"%(text,self.uuid)
         sep = '='*(len(header))
@@ -79,7 +80,7 @@ class Factura:
             text = "%s\n%s"%(self.emisor,text)
         else:
             text = "%s\n%s"%(self.emisor.nombre,text)
-            
+        
         for concepto in self.conceptos:
             text = "%s\n    * %s"%(text,concepto)
         
@@ -140,6 +141,7 @@ class Factura:
             d = datetime.datetime.strptime( fecha, "%Y-%m-%dT%H:%M:%S" )
             self.fecha = d
             self.delta = (now.date() - self.fecha.date())
+            self.metodoDePago = _cmp.get('metodoDePago')
             
         self.emisor = self.loadPersona(root.iter("{http://www.sat.gob.mx/cfd/3}Emisor"))
         self.receptor = self.loadPersona(root.iter("{http://www.sat.gob.mx/cfd/3}Receptor"))
