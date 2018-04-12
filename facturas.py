@@ -18,7 +18,7 @@ class Domicilio:
         self.codigopostal=''
     def __str__(self):
         text = ''
-        if self.calle:         text =  text + self.calle 
+        if self.calle:         text =  text + self.calle
         if self.noExterior:    text =  text + ' ' + self.noExterior
         if self.colonia :      text =  text + ' ' + self.colonia
         if self.localidad :    text =  text + ' ' + self.localidad
@@ -35,19 +35,19 @@ class Persona:
         self.domicilio = None
 
     def __str__(self):
-        
+
         text = "%s %s %s"%(self.rfc, self.nombre, self.domicilio)
         return text
-    
+
 class NominaItem:
     def __init__(self,concepto,importeExento,importeGravado):
         self.concepto = concepto
         self.importeExcento = importeExento
         self.importeGravado = importeGravado
-        
+
     def __str__(self):
         total = float(self.importeExcento+self.importeGravado)
-        return "%-40s $%s"%(self.concepto,'{:10,.2f}'.format(total))
+        return "%-60s $%s"%(self.concepto,'{:10,.2f}'.format(total))
 
 class Factura:
     def __init__(self, dirname, filename, opciones):
@@ -67,12 +67,16 @@ class Factura:
         self.fecha_inicial = None
         self.fecha_final = None
         self.metodoDePago = ''
-                
+        self.totalImpuestosRetenidos = 0
+        self.totalGravado = 0
+        self.totalExento = 0
+        self.totalSueldos = 0
+
     def __str__(self):
         header = "%s - %s - %s "%(os.path.basename(os.path.abspath(os.path.join(self.dirname,os.path.pardir))), os.path.basename(self.dirname), self.filename)
-        header = "=== %-46s | %38s ==="%(header, self.uuid) 
+        header = "=== %-46s | %38s ==="%(header, self.uuid)
         text =  "%i days: $%s (%7.2f) %s  %-25s"%(self.delta.days, '{:0,.2f}'.format(self.total), self.total, self.metodoDePago , self.fecha.date().strftime("%m/%d/%Y") )
-        
+
         #text = "%s     %s"%(text,self.uuid)
         sep = '='*(len(header))
 
@@ -80,31 +84,44 @@ class Factura:
             text = "%s\n%s"%(self.emisor,text)
         else:
             text = "%s\n%s"%(self.emisor.nombre,text)
-        
+
         for concepto in self.conceptos:
             text = "%s\n    * %s"%(text,concepto)
-        
+
         if self.opciones.longnames:
             text = "%s\n%s"%(self.receptor,text)
         #else:
         #    text = "%s\n%s"%(self.receptor.nombre,text)
-            
+
         total_p = 0
         for percepcion in self.percepciones:
             text = "%s\n       + %s"%(text,percepcion)
             total_p = total_p + percepcion.importeExcento + percepcion.importeGravado
         if total_p > 0:
-            text = "%s\n       %s $%s"%(text,"-"*50,'{:0,.2f}'.format(total_p))
-        
+            text = "%s\n       %s $%s"%(text,"-"*75,'{:0,.2f}'.format(total_p))
+
         total_d = 0
         for deduccion in self.deducciones:
             text = "%s\n       - %s"%(text,deduccion)
             total_d = total_d +  deduccion.importeExcento + deduccion.importeGravado
         if total_d > 0:
-            text = "%s\n       %s $%s"%(text,"-"*50,'{:0,.2f}'.format(total_d))
+            text = "%s\n       %s $%s"%(text,"-"*75,'{:0,.2f}'.format(total_d))
+
+        if self.totalSueldos:
+            text = "%s\nTotal Sueldos: %s"%(text,'{:0,.2f}'.format(self.totalSueldos))
+            if abs(self.totalSueldos - total_p) > 1:
+                text = "%s [ERROR TotalSueldo (%.2f) don't match sum of percepciones(%.2f)]"%(text,self.totalSueldos,total_p)
+
+        text = "%s\n      Gravado: %s"%(text,'{:0,.2f}'.format(self.totalGravado))
+        text = "%s\n       Exento: %s"%(text,'{:0,.2f}'.format(self.totalExento))
+        text = "%s\nTotal Impuestos Retenidos: %s"%(text,'{:0,.2f}'.format(self.totalImpuestosRetenidos))
+
+        if abs(self.totalExento + self.totalGravado - self.totalSueldos) > 1:
+            text = "%s\n[ERROR]: perceptions do not match: %.2f != %.2f "%(text,self.totalExento + self.totalGravado,self.totalSueldos)
+
         all = "\n%s\n%s\n%s\n%s"%(sep,header,sep,text)
         return all #.encode('utf8')
-        
+
     def loadPersona(self,root_persona):
         persona = None
         for _persona in root_persona:
@@ -123,31 +140,37 @@ class Factura:
                 persona.domicilio.pais = _domicilio.get("pais");
                 persona.domicilio.codigoPostal = _domicilio.get("codigoPostal");
         return persona
-        
-        
+
+
     def load_xml(self):
         now = datetime.datetime.now()
         import xml.etree.ElementTree as ET
         tree = ET.parse(os.path.join( self.dirname, self.filename ))
         root = tree.getroot()
-        
-        #print "\n--- %s ---"%os.path.basename(dirname)
+
+        print "\n--- %s ---"%os.path.join( self.dirname, self.filename )
         comprobantes=0
         for _cmp in root.iter("{http://www.sat.gob.mx/cfd/3}Comprobante"):
             comprobantes += 1
             x = _cmp.get('total')
+            if x == None:
+                x = _cmp.get('Total')
             self.total = float(x)
             fecha = _cmp.get('fecha')
+            if fecha == None:
+                fecha = _cmp.get('Fecha')
             d = datetime.datetime.strptime( fecha, "%Y-%m-%dT%H:%M:%S" )
             self.fecha = d
             self.delta = (now.date() - self.fecha.date())
             self.metodoDePago = _cmp.get('metodoDePago')
-            
+            for _complemento in root.iter("{http://www.sat.gob.mx/cfd/3}Comprobante/Complemento"):
+                print _complemento
+
         self.emisor = self.loadPersona(root.iter("{http://www.sat.gob.mx/cfd/3}Emisor"))
         self.receptor = self.loadPersona(root.iter("{http://www.sat.gob.mx/cfd/3}Receptor"))
-        
 
-            
+
+
     #        print text
         if comprobantes != 1:
             print "\n\n*************************************\n"
@@ -156,10 +179,30 @@ class Factura:
             print      "*  Comprobantes = %i\n"%(comprobantes)
             print      "*  File=%s/%s\n"%(self.dirname,self.filename)
             print      "*************************************\n"
-    
+
         for _comple in root.iter("{http://www.sat.gob.mx/cfd/3}Complemento"):
             for x in _comple.iter("{http://www.sat.gob.mx/TimbreFiscalDigital}TimbreFiscalDigital"):
                 self.uuid = x.get('UUID')
+
+            for _nomina in _comple.iter("{http://www.sat.gob.mx/nomina12}Nomina"):
+                print _nomina.get("FechaPago"), _nomina.get("FechaInicialPago"), _nomina.get("FechaFinalPago")
+                self.fecha_inicial = datetime.datetime.strptime(_nomina.get("FechaInicialPago") , "%Y-%m-%d" )
+                self.fecha_final   =   datetime.datetime.strptime(_nomina.get("FechaFinalPago") , "%Y-%m-%d" )
+                for _p in _nomina.iter("{http://www.sat.gob.mx/nomina12}Percepciones"):
+                    self.totalSueldos = float( _p.get("TotalSueldos") )
+                    self.totalGravado = float( _p.get("TotalGravado") )
+                    self.totalExento = float( _p.get("TotalExento") )
+                    for p in _p.iter("{http://www.sat.gob.mx/nomina12}Percepcion"):
+                        x = NominaItem(p.get("Concepto"),float(p.get("ImporteExento")),float(p.get("ImporteGravado")))
+                        self.percepciones.append(x)
+
+                for _d in _nomina.iter("{http://www.sat.gob.mx/nomina12}Deducciones"):
+                    self.totalImpuestosRetenidos = float (_d.get("TotalImpuestosRetenidos",0))
+                    for d in _d.iter("{http://www.sat.gob.mx/nomina12}Deduccion"):
+                        x = NominaItem(d.get("Concepto"),float(d.get("Importe")),0)
+                        self.deducciones.append(x)
+
+
 
         for _concepto in root.iter("{http://www.sat.gob.mx/cfd/3}Conceptos"):
             for x in _concepto.iter("{http://www.sat.gob.mx/cfd/3}Concepto"):
@@ -172,11 +215,12 @@ class Factura:
             self.fecha_final   =   datetime.datetime.strptime(_nomina.get("FechaFinalPago") , "%Y-%m-%d" )
             for p in _nomina.iter("{http://www.sat.gob.mx/nomina}Percepcion"):
                 x = NominaItem(p.get("Concepto"),float(p.get("ImporteExento")),float(p.get("ImporteGravado")))
-                self.percepciones.append(x) 
+                self.percepciones.append(x)
 
             for d in _nomina.iter("{http://www.sat.gob.mx/nomina}Deduccion"):
                 x = NominaItem(d.get("Concepto"),float(d.get("ImporteExento")),float(d.get("ImporteGravado")))
-                self.deducciones.append(x) 
+                self.deducciones.append(x)
+
 
 class Opciones:
     def __init__(self):
@@ -193,16 +237,16 @@ class Facturas:
         self.buzon    = []
         self.uuids=[]
         self.opciones = Opciones()
-        
+
 
     def load_xmls(self, from_path, recursive):
         for dirname, subdirs, fnames in os.walk( os.path.abspath( from_path ) ) :
-            if not recursive:  
-                while len(subdirs) > 0:  
+            if not recursive:
+                while len(subdirs) > 0:
                     subdirs.pop()
             #print dirname, subdirs
             buzon =  "buzon" in dirname or "_too_late" in dirname
-            
+
             #dir_head="\n--- %s - %s ---"%(os.path.basename(os.path.abspath(os.path.join(dirname,os.path.pardir))), os.path.basename(dirname))
             for fnamex in fnames:
                 if fnmatch.fnmatch( fnamex, '*.xml' ):
@@ -228,14 +272,14 @@ class Facturas:
                 if old != new:
                     print old, "===>", new
                     os.rename(old,new)
-                
+
                 old_pdf = os.path.join(f.dirname,"%s%s"%(file,".pdf"))
                 if os.path.exists(old_pdf):
                     new_pdf = os.path.join(f.dirname, "%s_%s_%s%s"%(self.opciones.rename, f.fecha_inicial.date().strftime("%Y-%m-%d"), f.fecha_final.date().strftime("%Y-%m-%d"),".pdf"))
                     if old_pdf != new_pdf:
                         print old_pdf,"===>",new_pdf
                         os.rename(old_pdf, new_pdf)
-            
+
     def print_facturas(self):
         if self.opciones.rename == None:
             self.print_data(sorted(self.facturas, key=lambda x: x.fecha, reverse=False))
@@ -243,31 +287,50 @@ class Facturas:
             print "-- %i Pendings --"%len(self.facturas)
             print "-- %i Buzon    --"%len(self.buzon)
             print "-- %i Repeated --"%len(self.repeated)
-            
+
             #for x in sorted(self.uuids): print x
             if len(self.repeated) >0:
                 print "\nRepeated: %i"%len(self.repeated)
                 self.print_data(sorted(self.repeated, key=lambda x: x.fecha, reverse=False))
-                
+
             if self.opciones.print_buzon and len(self.buzon) > 0:
                 print "\n Buzon: %i"%len(self.buzon)
                 self.print_data(sorted(self.buzon, key=lambda x: x.fecha, reverse=False))
 
     def print_data(self, data):
-        total =0
+        total = 0
+        totalSueldos = 0
+        totalGravado = 0
+        totalExento = 0
+        totalImpuestosRetenidos = 0
+
         max_delta = 0
         dir_text = ''
         for f in data:
             max_delta = max(max_delta,f.delta.days)
             total += f.total
             dir_text = "%s\n%s"%(dir_text,f)
-        #dir_text = "%s%s\n%s"%('#'*len(dir_head),dir_head,'#'*len(dir_head)) + dir_text 
+            totalGravado += f.totalGravado
+            totalExento += f.totalExento
+            totalSueldos += f.totalSueldos
+            totalImpuestosRetenidos += f.totalImpuestosRetenidos
+        #dir_text = "%s%s\n%s"%('#'*len(dir_head),dir_head,'#'*len(dir_head)) + dir_text
         print "%s\n\n--  TOTAL: $ %s --\n--  Delta: %i days --\n--  %i Facturas --\n"%(dir_text.encode('utf-8'),'{:0,.2f}'.format(total),max_delta,len(data))
-    
+        print "\n\n"
+        text = ''
+        text = "%s\nTotal Sueldos: %s"%(text,'{:0,.2f}'.format(totalSueldos))
+        text = "%s\n      Gravado: %s"%(text,'{:0,.2f}'.format(totalGravado))
+        text = "%s\n       Exento: %s"%(text,'{:0,.2f}'.format(totalExento))
+        text = "%s\nTotal Impuestos Retenidos: %s"%(text,'{:0,.2f}'.format(totalImpuestosRetenidos))
+        if abs(totalExento + totalGravado - totalSueldos) > 1:
+            text = "%s\n[ERROR]: perceptions do not match: %.2f != %.2f "%(text,totalExento + totalGravado, totalSueldos)
+
+        print "%s\n\n"%text
+
     def sort_dict_data(self):
         self.facturas
         self.ordered = OrderedDict((k, v) for k, v in sorted(self.facturas.iteritems()))
-        
+
 
     def usage(self):
         print "\nUSAGE: %.90s [options]" % sys.argv[0]
@@ -278,7 +341,7 @@ class Facturas:
         print "        -n, --nomina                  Parse XMLs as nomina"
         print "        -n, --longnames               Print the names of the issuer and receiver with address"
 
-    
+
     def parse_args(self,argv):
         try:
             opts, args = getopt.getopt(argv, "bhr:nl", ["buzon","help","rename=", "nomina","longnames"])
@@ -308,5 +371,5 @@ if __name__ == "__main__":
     f.load_xmls(os.getcwd(),True)
     f.process_facturas()
     f.print_facturas()
-   
+
     sys.exit(0)
